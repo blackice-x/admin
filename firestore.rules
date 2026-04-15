@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Fields: uid, email, displayName, role (admin|supplier|customer), status (pending|approved|rejected), createdAt
+    //
+    // Collection: products
+    // Fields: title, description, price, stock, category, images, supplierId, supplierName, status (pending|approved|rejected), createdAt
+    //
+    // Collection: orders
+    // Fields: customerId, items, total, status, createdAt
+    //
+    // Collection: categories
+    // Fields: name, slug
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'owner'] ||
+         ((request.auth.token.email == "muhammadbadsha12378@gmail.com" || 
+           request.auth.token.email == "alberttomy255@gmail.com" || 
+           request.auth.token.email == "alberttomy255@gamil.com") && request.auth.token.email_verified == true));
+    }
+
+    function isSupplier() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'supplier';
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid is string &&
+             data.email is string &&
+             data.role in ['admin', 'owner', 'supplier', 'customer'];
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['title', 'price', 'supplierId', 'status']) &&
+             data.title is string && data.title.size() < 200 &&
+             data.price is number && data.price >= 0 &&
+             data.supplierId is string &&
+             data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    (isOwner(userId) || isAdmin());
+      allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role);
+    }
+
+    match /products/{productId} {
+      allow read: if resource.data.status == 'approved' || isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.supplierId);
+      allow create: if isAuthenticated() && (isSupplier() || isAdmin()) && isValidProduct(request.resource.data) && request.resource.data.supplierId == request.auth.uid;
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.supplierId && request.resource.data.supplierId == resource.data.supplierId);
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.supplierId);
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.customerId || isAdmin() || isSupplier());
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || isSupplier();
+    }
+
+    match /tickets/{ticketId} {
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.userId);
+      allow create: if isAuthenticated();
+      allow update: if isAdmin();
+    }
+
+    match /suppliers_info/{supplierId} {
+      allow read: if isAdmin() || isSupplier();
+      allow write: if isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /analytics/{docId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+  }
+}
